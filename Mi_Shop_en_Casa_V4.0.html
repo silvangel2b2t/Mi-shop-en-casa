@@ -1,0 +1,377 @@
+
+<!DOCTYPE html>
+
+<html lang="es">
+<head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1" name="viewport"/>
+<title>My Shop en Casa</title>
+<style>
+    body { font-family: Arial; margin: 20px; }
+    .hidden { display: none; }
+    button { margin: 4px; }
+    .estante { border: 1px solid #ccc; padding: 10px; margin-bottom: 10px; }
+    .producto { border: 1px solid #ddd; margin: 5px; padding: 5px; }
+    .stock-bajo { color: red; font-weight: bold; }
+    #historialTexto { background: #f0f0f0; padding: 10px; height: 150px; overflow-y: auto; white-space: pre-wrap; }
+    #graficaContenedor { max-width: 600px; margin-top: 20px; }
+  </style>
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body>
+<h1>My Shop en Casa</h1>
+<div id="pantallaNegocios">
+<h2>Crear nuevo negocio</h2>
+<input id="nombreNegocioNuevo" placeholder="Nombre del negocio" type="text"/>
+<input id="nombreDuenoNuevo" placeholder="Nombre del dueño" type="text"/>
+<input id="presupuestoInicialNuevo" placeholder="Presupuesto inicial (Gs)" type="number"/>
+<button onclick="crearNegocio()">Crear negocio</button>
+<h3>Negocios existentes</h3>
+<div id="listaNegocios"></div>
+</div>
+<div class="hidden" id="pantallaGestion">
+<button onclick="volver()">← Volver</button>
+<h2 id="infoNegocio"></h2>
+<button onclick="editarNegocio()">Editar negocio</button>
+<button onclick="borrarNegocio()" style="color:red;">Borrar negocio</button>
+<p><strong>Presupuesto:</strong> <span id="presupuesto"></span></p>
+<input id="metaInput" placeholder="Meta (Gs)" type="number"/>
+<button onclick="setMeta()">Establecer meta</button>
+<p>Avance: <span id="metaAvance"></span></p>
+<h3>Estantes</h3>
+<input id="nuevoEstante" placeholder="Nombre del estante" type="text"/>
+<button onclick="crearEstante()">Crear estante</button>
+<div id="estantesContainer"></div>
+<h3>Gastos externos</h3>
+<button onclick="agregarGasto()">Agregar gasto externo</button>
+<ul id="listaGastos"></ul>
+<h3>Historial</h3>
+<div>
+<label>Filtrar historial:</label>
+<button onclick="filtrarHistorial('todo')">Todo</button>
+<button onclick="filtrarHistorial('venta')">Ventas</button>
+<button onclick="filtrarHistorial('gastoStock')">Reposiciones</button>
+<button onclick="filtrarHistorial('gastoExterno')">Gastos externos</button>
+</div>
+<pre id="historialTexto"></pre>
+<h3>Gráfico</h3>
+<canvas id="graficaGanancias"></canvas>
+</div>
+<script>
+    let negocios = [];
+
+    
+    function filtrarHistorial(tipo) {
+      const n = getNegocio();
+      const historialTexto = document.getElementById("historialTexto");
+      let filtrado = n.historial;
+      if (tipo !== 'todo') {
+        filtrado = n.historial.filter(h => h.tipo === tipo);
+      }
+      historialTexto.innerText = filtrado.map(h => h.texto).join("\n");
+    }
+
+function guardarEnLocalStorage() {
+      localStorage.setItem("misNegocios", JSON.stringify(negocios));
+    }
+
+    function cargarDesdeLocalStorage() {
+      const data = localStorage.getItem("misNegocios");
+      if (data) {
+        negocios = JSON.parse(data);
+      }
+    }
+
+    let negocioActivoIndex = null;
+    let chart = null;
+
+    function formatGs(n) {
+      return "₲" + n.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ".");
+    }
+
+    function crearNegocio() {
+      const nombre = document.getElementById("nombreNegocioNuevo").value.trim();
+      const dueno = document.getElementById("nombreDuenoNuevo").value.trim();
+      const presupuesto = parseInt(document.getElementById("presupuestoInicialNuevo").value);
+
+      if (!nombre || !dueno || isNaN(presupuesto)) {
+        alert("Completa todos los campos.");
+        return;
+      }
+
+      negocios.push({ nombre, dueno, presupuesto, presupuestoInicial: presupuesto, meta: 0, estantes: [], historial: [], gastos: [] });
+guardarEnLocalStorage();
+      negocioActivoIndex = negocios.length - 1;
+
+      document.getElementById("nombreNegocioNuevo").value = "";
+      document.getElementById("nombreDuenoNuevo").value = "";
+      document.getElementById("presupuestoInicialNuevo").value = "";
+
+      
+    cargarDesdeLocalStorage();
+    mostrarListaNegocios();
+
+      abrirNegocio();
+    }
+
+    function mostrarListaNegocios() {
+      const lista = document.getElementById("listaNegocios");
+      lista.innerHTML = "";
+      negocios.forEach((n, i) => {
+        const div = document.createElement("div");
+        div.innerHTML = `<b>${n.nombre}</b> (Dueño: ${n.dueno}) - Presupuesto: ${formatGs(n.presupuesto)} 
+          <button onclick="abrirNegocioIndex(${i})">Abrir</button>`;
+        lista.appendChild(div);
+      });
+    }
+
+    function abrirNegocioIndex(index) {
+      negocioActivoIndex = index;
+      abrirNegocio();
+    }
+
+    function abrirNegocio() {
+      document.getElementById("pantallaNegocios").classList.add("hidden");
+      document.getElementById("pantallaGestion").classList.remove("hidden");
+      actualizarVista();
+guardarEnLocalStorage();
+    }
+
+    function volver() {
+      negocioActivoIndex = null;
+      document.getElementById("pantallaNegocios").classList.remove("hidden");
+      document.getElementById("pantallaGestion").classList.add("hidden");
+      
+    cargarDesdeLocalStorage();
+    mostrarListaNegocios();
+
+    }
+
+    function getNegocio() {
+      return negocios[negocioActivoIndex];
+    }
+
+    function crearEstante() {
+      const nombre = document.getElementById("nuevoEstante").value.trim();
+      if (!nombre) return alert("Escribí un nombre");
+      getNegocio().estantes.push({ nombre, productos: [] });
+      document.getElementById("nuevoEstante").value = "";
+      actualizarVista();
+guardarEnLocalStorage();
+    }
+
+    function agregarProducto(estanteIdx) {
+      const nombre = prompt("Producto:");
+      const stock = parseInt(prompt("Stock:"));
+      const venta = parseInt(prompt("Precio venta:"));
+      const costo = parseInt(prompt("Costo compra:"));
+      if (!nombre || isNaN(stock) || isNaN(venta) || isNaN(costo)) return;
+      getNegocio().estantes[estanteIdx].productos.push({ nombre, stock, venta, costo, vendidos: 0 });
+      actualizarVista();
+guardarEnLocalStorage();
+    }
+
+    function venderProducto(estanteIdx, prodIdx) {
+      const cant = parseInt(prompt("Cantidad vendida:"));
+      const n = getNegocio();
+      const p = n.estantes[estanteIdx].productos[prodIdx];
+      if (isNaN(cant) || cant <= 0 || cant > p.stock) return;
+      p.stock -= cant;
+      p.vendidos += cant;
+      const ingreso = cant * p.venta;
+      const ganancia = cant * (p.venta - p.costo);
+      n.presupuesto += ingreso;
+      const f = new Date().toLocaleString();
+      n.historial.push({ tipo: "venta", texto: `${f} - Vendiste ${cant} ${p.nombre} ganancia: ${formatGs(ganancia)}`, fecha: f });
+      actualizarVista();
+guardarEnLocalStorage();
+    }
+
+    function rellenarStock(estanteIdx, prodIdx) {
+      const n = getNegocio();
+      const p = n.estantes[estanteIdx].productos[prodIdx];
+      const cantidad = parseInt(prompt(`¿Cuánto stock vas a agregar a "${p.nombre}"?`));
+      if (isNaN(cantidad) || cantidad <= 0) return;
+      const costoTotal = cantidad * p.costo;
+      if (costoTotal > n.presupuesto) {
+        alert("No tienes suficiente presupuesto para reponer esa cantidad.");
+        return;
+      }
+      p.stock += cantidad;
+      n.presupuesto -= costoTotal;
+      const f = new Date().toLocaleString();
+      n.historial.push({ tipo: "gastoStock", texto: `${f} - Reponiste ${cantidad} ${p.nombre} (₲${p.costo} c/u) por ${formatGs(costoTotal)}`, fecha: f });
+      actualizarVista();
+guardarEnLocalStorage();
+    }
+
+    function borrarEstante(estanteIdx) {
+      if (!confirm("¿Seguro que quieres borrar este estante y sus productos?")) return;
+      getNegocio().estantes.splice(estanteIdx, 1);
+      actualizarVista();
+guardarEnLocalStorage();
+    }
+
+    function borrarProducto(estanteIdx, prodIdx) {
+      if (!confirm("¿Seguro que quieres borrar este producto?")) return;
+      getNegocio().estantes[estanteIdx].productos.splice(prodIdx, 1);
+      actualizarVista();
+guardarEnLocalStorage();
+    }
+
+    function agregarGasto() {
+      const n = getNegocio();
+      const desc = prompt("Descripción del gasto:");
+      if (!desc) return;
+      const monto = parseInt(prompt("Monto del gasto (Gs):"));
+      if (isNaN(monto) || monto <= 0) return;
+      if (monto > n.presupuesto) {
+        alert("No tienes suficiente presupuesto para ese gasto.");
+        return;
+      }
+      n.presupuesto -= monto;
+      const f = new Date().toLocaleString();
+      n.gastos.push({ desc, monto, fecha: f });
+      n.historial.push({ tipo: "gastoExterno", texto: `${f} - Gasto: ${desc} por ${formatGs(monto)}`, fecha: f });
+      actualizarVista();
+guardarEnLocalStorage();
+    }
+
+    function editarNegocio() {
+      const n = getNegocio();
+      const nuevoNombre = prompt("Nuevo nombre del negocio:", n.nombre);
+      const nuevoDueno = prompt("Nuevo nombre del dueño:", n.dueno);
+      const nuevoPresupuesto = parseInt(prompt("Nuevo presupuesto:", n.presupuesto));
+      if (nuevoNombre) n.nombre = nuevoNombre;
+      if (nuevoDueno) n.dueno = nuevoDueno;
+      if (!isNaN(nuevoPresupuesto)) n.presupuesto = nuevoPresupuesto;
+      actualizarVista();
+guardarEnLocalStorage();
+    }
+
+    function borrarNegocio() {
+  if (!confirm("¿Seguro que deseas borrar este negocio?")) return;
+  negocios.splice(negocioActivoIndex, 1);
+  negocioActivoIndex = null;
+  guardarEnLocalStorage();
+  volver();
+}
+
+    function setMeta() {
+      const val = parseInt(document.getElementById("metaInput").value);
+      if (!isNaN(val)) {
+        getNegocio().meta = val;
+        actualizarVista();
+guardarEnLocalStorage();
+      }
+    }
+
+    function calcularGananciaTotal() {
+      return getNegocio().estantes.reduce((acc, e) =>
+        acc + e.productos.reduce((s, p) => s + p.vendidos * (p.venta - p.costo), 0), 0);
+    }
+
+    function actualizarVista() {
+      const n = getNegocio();
+      document.getElementById("infoNegocio").innerText = `${n.nombre} - ${n.dueno}`;
+      document.getElementById("presupuesto").innerText = formatGs(n.presupuesto);
+      
+      const gananciaTotal = n.presupuesto - n.presupuestoInicial;
+      document.getElementById("metaAvance").innerText = `${formatGs(gananciaTotal)} / ${formatGs(n.meta)}`;
+
+      const listaGastos = document.getElementById("listaGastos");
+      listaGastos.innerHTML = "";
+      n.gastos.forEach(g => {
+        const li = document.createElement("li");
+        li.textContent = `${g.fecha} - ${g.desc} - ${formatGs(g.monto)}`;
+        listaGastos.appendChild(li);
+      });
+      const cont = document.getElementById("estantesContainer");
+      cont.innerHTML = "";
+      n.estantes.forEach((e, i) => {
+        const div = document.createElement("div");
+        div.className = "estante";
+        div.innerHTML = `<h4>${e.nombre} <button onclick="borrarEstante(${i})" style="color:red;">Borrar estante</button></h4>`;
+        e.productos.forEach((p, j) => {
+          const rojo = p.stock <= 1 ? 'stock-bajo' : '';
+          div.innerHTML += `<div class="producto">
+            <b>${p.nombre}</b><br>
+            Stock: <span class="${rojo}">${p.stock}</span><br>
+            Venta: ${formatGs(p.venta)} | Costo: ${formatGs(p.costo)}<br>
+            <button onclick="venderProducto(${i}, ${j})">Vender</button>
+            <button onclick="rellenarStock(${i}, ${j})">Rellenar stock</button>
+            <button onclick="borrarProducto(${i}, ${j})" style="color:red;">Borrar</button>
+          </div>`;
+        });
+        div.innerHTML += `<button onclick="agregarProducto(${i})">Agregar producto</button>`;
+        cont.appendChild(div);
+      });
+      
+      const historial = n.historial;
+      const historialTexto = document.getElementById("historialTexto");
+      const grupos = { venta: [], gastoStock: [], gastoExterno: [] };
+      historial.forEach(h => { if (grupos[h.tipo]) grupos[h.tipo].push(h.texto); });
+      historialTexto.innerText =
+        "🔵 Ventas:\n" + grupos.venta.join("\n") + "\n\n" +
+        "🟠 Reposición de stock:\n" + grupos.gastoStock.join("\n") + "\n\n" +
+        "🔴 Gastos externos:\n" + grupos.gastoExterno.join("\n");
+
+      actualizarGrafica();
+    }
+
+    function obtenerGananciasMensuales() {
+      const n = getNegocio();
+      const map = {};
+      n.historial.forEach(h => {
+        if (h.tipo === "venta") {
+          const d = new Date(h.fecha);
+          const key = `${d.getFullYear()}-${(d.getMonth() + 1).toString().padStart(2, '0')}`;
+          const match = h.texto.match(/ganancia: ₲([\d\.]+)/);
+          const g = match ? parseInt(match[1].replace(/\./g, "")) : 0;
+          map[key] = (map[key] || 0) + g;
+        }
+      });
+      return map;
+    }
+
+    function actualizarGrafica() {
+      const ctx = document.getElementById("graficaGanancias").getContext("2d");
+      const data = obtenerGananciasMensuales();
+      const meses = Object.keys(data).sort();
+      const ganancias = meses.map(m => data[m]);
+      if (chart) {
+        chart.data.labels = meses;
+        chart.data.datasets[0].data = ganancias;
+        chart.update();
+      } else {
+        chart = new Chart(ctx, {
+          type: 'bar',
+          data: {
+            labels: meses,
+            datasets: [{
+              label: 'Ganancias',
+              data: ganancias,
+              backgroundColor: 'rgba(54, 162, 235, 0.7)'
+            }]
+          },
+          options: {
+            scales: {
+              y: {
+                beginAtZero: true,
+                ticks: {
+                  callback: value => formatGs(value)
+                }
+              }
+            }
+          }
+        });
+      }
+    }
+
+    
+    cargarDesdeLocalStorage();
+    mostrarListaNegocios();
+
+  </script>
+<div style="position: fixed; bottom: 10px; right: 10px; opacity: 0.2; font-size: 16px;">SILVANGEL🇵🇾</div></body>
+</html>
